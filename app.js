@@ -1,6 +1,6 @@
 /* ---------------- IndexedDB layer ---------------- */
 const DB_NAME = "PropertyRegisterDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise = null;
 
 function openDB() {
@@ -14,6 +14,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains("contacts")) {
         db.createObjectStore("contacts", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("sharedImports")) {
+        db.createObjectStore("sharedImports", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -47,6 +50,15 @@ async function idbDelete(store, id) {
     tx.objectStore(store).delete(id);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbGet(store, id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, "readonly");
+    const req = tx.objectStore(store).get(id);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
   });
 }
 
@@ -343,7 +355,10 @@ const state = {
   registerSort: "updated",
   showArchived: false,
   selectMode: false,
-  selectedIds: new Set()
+  selectedIds: new Set(),
+  importActive: false,
+  importPreviewUrl: null,
+  importStatus: ""
 };
 
 const STATUS_LIST = ["All", "Interested", "Viewing", "Negotiating", "Purchased", "Dropped"];
@@ -491,10 +506,10 @@ function renderRegister() {
   }
   empty.classList.add("hidden");
 
-  list.innerHTML = items.map((p) => {
+  list.innerHTML = items.map((p, i) => {
     const pps = pricePerSqft(p.price, p.areaSqft);
     return `
-      <div class="ledger-row ${state.selectMode ? "selectable" : ""}" data-id="${p.id}">
+      <div class="ledger-row ${state.selectMode ? "selectable" : ""}" data-id="${p.id}" style="--i:${i}">
         ${state.selectMode ? `<input type="checkbox" class="ledger-checkbox" ${state.selectedIds.has(p.id) ? "checked" : ""} />` : ""}
         <div class="ledger-main">
           <p class="ledger-title">${p.pinned ? '<span class="pin-mark">★</span>' : ""}${escapeHtml(p.title || "Untitled property")}${p.archived ? '<span class="archived-mark">Archived</span>' : ""}</p>
@@ -545,6 +560,7 @@ function wireRegisterControls() {
 
 /* ---------------- Property overlay ---------------- */
 function openPropertyOverlay(id) {
+  resetImportState();
   if (id) {
     state.openPropertyId = id;
     state.openPropertyIsNew = false;
@@ -566,9 +582,16 @@ function closePropertyOverlay() {
   document.getElementById("overlay-property").classList.add("hidden");
   state.openPropertyId = null;
   state.propertyDraft = null;
+  resetImportState();
+}
+function resetImportState() {
+  if (state.importPreviewUrl) URL.revokeObjectURL(state.importPreviewUrl);
+  state.importActive = false;
+  state.importPreviewUrl = null;
+  state.importStatus = "";
 }
 function renderPropertyTabs() {
-  document.getElementById("prop-heading").textContent = state.openPropertyIsNew ? "New property" : "Edit property";
+  document.getElementById("prop-heading").textContent = state.importActive ? "Import from video" : (state.openPropertyIsNew ? "New property" : "Edit property");
   document.querySelectorAll("#prop-tabs .sheet-tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === state.propertyTab);
   });
@@ -592,6 +615,13 @@ function renderPropertyBody() {
 
   if (state.propertyTab === "info") {
     body.innerHTML = `
+      ${state.importActive ? `
+        <div class="import-banner">
+          <video src="${state.importPreviewUrl}" controls playsinline muted style="width:100%;border-radius:8px;max-height:220px;object-fit:cover;"></video>
+          <p class="import-banner-status">${escapeHtml(state.importStatus)}</p>
+          <p class="import-banner-note">Imported from a shared video — extraction is best-effort. Check every field before saving.</p>
+        </div>
+      ` : ""}
       <div class="field">
         <label>Title</label>
         <input type="text" id="f-title" value="${escapeHtml(d.title)}" placeholder="e.g. Green Valley Plot, Saravanampatti" />
@@ -1007,10 +1037,10 @@ function renderContacts() {
     return;
   }
   empty.classList.add("hidden");
-  list.innerHTML = state.contacts.map((c) => {
+  list.innerHTML = state.contacts.map((c, i) => {
     const linked = state.properties.filter((p) => p.contactId === c.id).length;
     return `
-      <div class="ledger-row" data-id="${c.id}">
+      <div class="ledger-row" data-id="${c.id}" style="--i:${i}">
         <div class="ledger-main">
           <p class="ledger-title">${escapeHtml(c.name || "Unnamed")}</p>
           <p class="ledger-sub">${escapeHtml(c.role)}${c.phone ? " · " + escapeHtml(c.phone) : ""}</p>
@@ -1424,6 +1454,23 @@ async function init() {
 
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+
+  await checkPendingSharedImport();
+}
+
+async function checkPendingSharedImport() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("import") !== "pending") return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const record = await idbGet("sharedImports", "pending");
+    if (record && record.blob) {
+      await idbDelete("sharedImports", "pending");
+      startVideoImport(record.blob);
+    }
+  } catch (e) {
+    toast("Couldn't read the shared video");
   }
 }
 init();
