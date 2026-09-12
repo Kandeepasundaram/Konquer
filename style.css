@@ -415,6 +415,155 @@ table.compare-table th{
 table.compare-table td{ font-family: var(--mono); font-size: 12.5px; }
 table.compare-table td.name-cell{ font-family: var(--serif); font-size: 13.5px; }
 
+/* ---------- Register controls ---------- */
+.register-controls{
+  display:flex; gap:8px;
+  padding: 12px 0 8px;
+}
+.register-controls #reg-search{
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 14px;
+  padding: 9px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+.register-controls #reg-sort{
+  flex: 0 0 auto;
+  max-width: 42%;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 9px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper-raised);
+  color: var(--ink);
+}
+.register-toolbar{
+  display:flex; align-items:center; justify-content:space-between;
+  padding-bottom: 6px;
+}
+.checkbox-inline{
+  display:flex; align-items:center; gap:6px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.checkbox-inline input{ margin:0; }
+
+.followup-banner{
+  background: rgba(184,137,43,0.12);
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.followup-banner-title{
+  font-size: 12px; font-weight:600; color: var(--gold);
+  margin: 0 0 6px;
+}
+.followup-item{
+  display:flex; justify-content:space-between;
+  font-size: 13px;
+  padding: 4px 0;
+  cursor:pointer;
+}
+.followup-item .date{ font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+
+.bulk-bar{
+  display:flex; align-items:center; gap:8px;
+  flex-wrap: wrap;
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-size: 12.5px;
+}
+.bulk-bar select{
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 6px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+}
+.bulk-bar button{
+  font-family: var(--sans);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  cursor:pointer;
+}
+.bulk-bar .danger{ border-color: var(--danger); color: var(--danger); }
+.bulk-bar .count{ font-weight:600; margin-right:auto; }
+
+.ledger-row.selectable{ align-items:center; }
+.ledger-checkbox{ margin-right: 10px; flex-shrink:0; }
+.tag-row{ display:flex; flex-wrap:wrap; gap:5px; margin: 4px 0 2px; }
+.tag-chip{
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(47,110,98,0.1);
+  color: var(--survey);
+}
+.pin-mark{ color: var(--gold); margin-right: 4px; }
+.archived-mark{ color: var(--ink-soft); font-style: italic; font-size: 11px; margin-left: 6px; }
+
+/* ---------- Checklist / Visits ---------- */
+.checklist-item{
+  display:flex; align-items:center; gap:10px;
+  padding: 9px 0;
+  border-bottom: 1px dashed var(--rule);
+}
+.checklist-item label{ flex:1; font-size: 14px; }
+.checklist-item.checked label{ color: var(--ink-soft); text-decoration: line-through; }
+.row-remove{
+  background:none; border:none; color: var(--danger); font-size: 16px; cursor:pointer; padding: 2px 6px;
+}
+.visit-entry{
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.visit-entry-head{
+  display:flex; justify-content:space-between; align-items:center;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+.visit-entry p{ margin:0; font-size: 13.5px; }
+
+/* ---------- Loan scenarios / contact links ---------- */
+.scenario-row{
+  display:flex; justify-content:space-between; align-items:center;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--rule);
+  font-size: 13px;
+}
+.scenario-row .val{ font-family: var(--mono); }
+.action-links{ display:flex; gap:8px; margin: -6px 0 14px; }
+.action-links a{
+  flex:1; text-align:center;
+  font-size: 12.5px;
+  padding: 8px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  color: var(--survey);
+  text-decoration:none;
+}
+.linked-prop-row{
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--rule);
+  font-size: 13.5px;
+  cursor:pointer;
+}
+
 /* ---------- Toast ---------- */
 .toast{
   position: fixed;

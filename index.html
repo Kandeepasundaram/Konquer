@@ -28,6 +28,23 @@
   <main id="main">
 
     <section id="view-register" class="view">
+      <div class="register-controls">
+        <input type="search" id="reg-search" placeholder="Search title, location, tags…" />
+        <select id="reg-sort">
+          <option value="updated">Recently updated</option>
+          <option value="price-desc">Price: high to low</option>
+          <option value="price-asc">Price: low to high</option>
+          <option value="pps-desc">Price/sqft: high to low</option>
+          <option value="pps-asc">Price/sqft: low to high</option>
+          <option value="status">Status</option>
+        </select>
+      </div>
+      <div class="register-toolbar">
+        <label class="checkbox-inline"><input type="checkbox" id="reg-archived" /> Show archived</label>
+        <button id="reg-select-btn" class="text-btn">Select</button>
+      </div>
+      <div id="reg-followups"></div>
+      <div id="reg-bulkbar" class="bulk-bar hidden"></div>
       <div id="register-list" class="ledger"></div>
       <p id="register-empty" class="empty-state hidden">
         No entries yet. Tap <strong>+</strong> to add the first property you're tracking.
@@ -37,8 +54,9 @@
     <section id="view-compare" class="view hidden">
       <div class="section-head">
         <h2>Compare</h2>
-        <p class="section-sub">Pick up to 4 properties to line up side by side.</p>
+        <button id="btn-share-compare" class="text-btn hidden">Share</button>
       </div>
+      <p class="section-sub">Pick up to 4 properties to line up side by side.</p>
       <div id="compare-picker" class="compare-picker"></div>
       <div id="compare-table-wrap"></div>
     </section>
@@ -58,8 +76,33 @@
       <div class="section-head">
         <h2>Quick Calc</h2>
       </div>
-      <p class="section-sub">Convert between cent / acre rates and total price. Not saved with any property — just a scratch pad.</p>
+      <div class="toggle-group" id="qc-tool-toggle">
+        <button data-tool="land" class="active">Land Rate</button>
+        <button data-tool="rentvsbuy">Rent vs Buy</button>
+      </div>
+      <p class="section-sub" id="qc-tool-sub">Convert between cent / acre rates and total price. Not saved with any property — just a scratch pad.</p>
       <div id="quickcalc-body"></div>
+      <div id="rentvsbuy-body" class="hidden"></div>
+    </section>
+
+    <section id="view-settings" class="view hidden">
+      <div class="section-head"><h2>Settings</h2></div>
+      <div class="field">
+        <label>Currency display</label>
+        <div class="toggle-group" id="set-currency-toggle">
+          <button data-mode="inr" class="active">₹ Indian</button>
+          <button data-mode="plain">Plain number</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Monthly budget, for EMI affordability checks (₹)</label>
+        <input type="text" inputmode="decimal" id="set-budget" placeholder="e.g. 40000, 40k" />
+      </div>
+      <div class="section-head"><h2>Backup</h2></div>
+      <p class="section-sub">Everything lives only on this device. Export a copy now and then, or before switching phones.</p>
+      <button class="btn-secondary" id="btn-export">Export data (.json)</button>
+      <button class="btn-secondary" id="btn-import">Import data (.json)</button>
+      <input type="file" id="file-import" accept="application/json" class="hidden" />
     </section>
 
   </main>
@@ -81,6 +124,10 @@
       <span class="tab-icon" aria-hidden="true">&#8776;</span>
       <span>Quick Calc</span>
     </button>
+    <button class="tab-btn" data-view="settings">
+      <span class="tab-icon" aria-hidden="true">&#9881;</span>
+      <span>Settings</span>
+    </button>
   </nav>
 </div>
 
@@ -97,6 +144,8 @@
       <button class="sheet-tab" data-tab="cost">Cost</button>
       <button class="sheet-tab" data-tab="emi">EMI</button>
       <button class="sheet-tab" data-tab="roi">Rental &amp; ROI</button>
+      <button class="sheet-tab" data-tab="checklist">Checklist</button>
+      <button class="sheet-tab" data-tab="visits">Visits</button>
     </div>
     <div class="sheet-body" id="prop-body"></div>
   </div>

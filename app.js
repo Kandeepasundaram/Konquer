@@ -76,10 +76,26 @@ function parsePrice(v, fallback = 0) {
   }
   return n;
 }
+function loadSettings() {
+  try {
+    return Object.assign({ currencyMode: "inr", budgetMonthly: 0 }, JSON.parse(localStorage.getItem("prSettings") || "{}"));
+  } catch (e) {
+    return { currencyMode: "inr", budgetMonthly: 0 };
+  }
+}
+function saveSettings() {
+  localStorage.setItem("prSettings", JSON.stringify(settings));
+}
+const settings = loadSettings();
+
 function fmtINR(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   const rounded = Math.round(n);
+  if (settings.currencyMode === "plain") return rounded.toLocaleString("en-IN");
   return "₹" + rounded.toLocaleString("en-IN");
+}
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
 }
 function fmtNum(n, digits = 1) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -100,7 +116,51 @@ function toast(msg) {
   toast._t = setTimeout(() => el.classList.add("hidden"), 1800);
 }
 
+/* ---------------- Share helpers ---------------- */
+async function shareText(text, title) {
+  if (navigator.share) {
+    try { await navigator.share({ title, text }); return; } catch (e) { return; }
+  }
+  try { await navigator.clipboard.writeText(text); toast("Copied to clipboard"); }
+  catch (e) { toast("Could not share"); }
+}
+function buildPropertyShareText(d) {
+  const cost = calcCostBreakdown(d);
+  const loan = d.emi.loanAmount || Math.round(cost.total * 0.8);
+  const emi = calcEMI(loan, d.emi.interestRatePct, d.emi.tenureYears);
+  const roi = calcRental(cost.total, d.rental);
+  return [
+    d.title || "Untitled property",
+    d.location || "",
+    `Price: ${fmtINR(d.price)}`,
+    `Total cost: ${fmtINR(cost.total)}`,
+    `EMI: ${fmtINR(emi.emi)}/mo`,
+    `Net rental yield: ${fmtPct(roi.netYieldPct)}`,
+    `Annualised ROI: ${fmtPct(roi.annualizedROIPct)}`
+  ].join("\n");
+}
+function buildCompareShareText(selected) {
+  const lines = ["Property comparison:"];
+  selected.forEach((p) => {
+    const cost = calcCostBreakdown(p);
+    const loan = p.emi.loanAmount || Math.round(cost.total * 0.8);
+    const emi = calcEMI(loan, p.emi.interestRatePct, p.emi.tenureYears);
+    lines.push(`\n${p.title || "Untitled"} — ${fmtINR(p.price)}, total ${fmtINR(cost.total)}, EMI ${fmtINR(emi.emi)}/mo`);
+  });
+  return lines.join("\n");
+}
+
 /* ---------------- Domain defaults ---------------- */
+const AMENITY_LIST = ["Parking", "Lift", "Power backup", "Water supply", "Security", "Gym", "Clubhouse", "Park"];
+const DEFAULT_CHECKLIST_LABELS = [
+  "Title deed verified",
+  "Encumbrance certificate (EC) checked",
+  "Property tax paid up to date",
+  "Building approval / patta verified",
+  "Loan pre-approval done",
+  "Site visit completed"
+];
+
 function defaultProperty() {
   const now = Date.now();
   return {
@@ -113,9 +173,20 @@ function defaultProperty() {
     areaSqft: 0,
     contactId: "",
     notes: "",
+    tags: [],
+    pinned: false,
+    archived: false,
+    detail: { bhk: "", floor: "", facing: "", ageYears: "" },
+    amenities: [],
+    mapLink: "",
+    followUp: { date: "", note: "" },
     cost: { registrationPct: 1, stampDutyPct: 7, brokeragePct: 1, gstPct: 0, otherCharges: 0 },
-    emi: { loanAmount: 0, interestRatePct: 8.5, tenureYears: 20 },
+    emi: { loanAmount: 0, interestRatePct: 8.5, tenureYears: 20, extraMonthly: 0, extraOneTime: 0 },
+    loanScenarios: [],
     rental: { monthlyRent: 0, annualExpensesPct: 1, appreciationPct: 6, holdingYears: 5 },
+    visits: [],
+    checklist: DEFAULT_CHECKLIST_LABELS.map((label) => ({ id: uid(), label, checked: false })),
+    priceHistory: [],
     createdAt: now,
     updatedAt: now
   };
@@ -123,6 +194,25 @@ function defaultProperty() {
 function defaultContact() {
   const now = Date.now();
   return { id: uid(), name: "", role: "Broker", phone: "", email: "", notes: "", createdAt: now };
+}
+/* Fills in fields missing on properties saved before a schema addition. */
+function ensurePropertyShape(p) {
+  const d = defaultProperty();
+  p.tags = Array.isArray(p.tags) ? p.tags : [];
+  p.pinned = !!p.pinned;
+  p.archived = !!p.archived;
+  p.detail = Object.assign({}, d.detail, p.detail || {});
+  p.amenities = Array.isArray(p.amenities) ? p.amenities : [];
+  p.mapLink = p.mapLink || "";
+  p.followUp = Object.assign({}, d.followUp, p.followUp || {});
+  p.cost = Object.assign({}, d.cost, p.cost || {});
+  p.emi = Object.assign({}, d.emi, p.emi || {});
+  p.loanScenarios = Array.isArray(p.loanScenarios) ? p.loanScenarios : [];
+  p.rental = Object.assign({}, d.rental, p.rental || {});
+  p.visits = Array.isArray(p.visits) ? p.visits : [];
+  p.checklist = Array.isArray(p.checklist) ? p.checklist : d.checklist;
+  p.priceHistory = Array.isArray(p.priceHistory) ? p.priceHistory : [];
+  return p;
 }
 
 /* ---------------- Calculators ---------------- */
@@ -171,6 +261,55 @@ function pricePerSqft(price, areaSqft) {
   const a = num(areaSqft);
   return a > 0 ? num(price) / a : null;
 }
+/* Simulates fixed-EMI amortisation with extra monthly/one-time payments applied. */
+function calcPrepayment(loanAmount, annualRatePct, years, extraMonthly, extraOneTime) {
+  const P0 = num(loanAmount);
+  const r = num(annualRatePct) / 100 / 12;
+  const nOriginal = Math.max(1, Math.round(num(years) * 12));
+  const base = calcEMI(P0, annualRatePct, years);
+  const emi = base.emi;
+  let balance = P0 - num(extraOneTime);
+  if (balance <= 0) return { valid: true, months: 0, totalInterest: 0, interestSaved: base.totalInterest, baselineMonths: nOriginal };
+  let totalPaid = num(extraOneTime);
+  let months = 0;
+  const cap = Math.max(nOriginal * 2, 1200);
+  while (balance > 0.5 && months < cap) {
+    const interest = balance * r;
+    const principalPortion = emi - interest;
+    if (principalPortion <= 0) return { valid: false };
+    let payment = emi + num(extraMonthly);
+    if (payment > balance + interest) payment = balance + interest;
+    balance -= (payment - interest);
+    totalPaid += payment;
+    months++;
+  }
+  if (months >= cap) return { valid: false };
+  const totalInterest = totalPaid - P0;
+  return { valid: true, months, totalInterest, interestSaved: base.totalInterest - totalInterest, baselineMonths: nOriginal };
+}
+/* Rough rent-vs-buy comparison over a holding horizon; a scratch-pad estimate, not financial advice. */
+function calcRentVsBuy(r) {
+  const price = num(r.price);
+  const downPayment = price * num(r.downPct) / 100;
+  const loanAmount = price - downPayment;
+  const emiRes = calcEMI(loanAmount, r.ratePct, r.years);
+  const horizon = Math.max(0, num(r.horizonYears));
+  const buyMonths = Math.min(horizon * 12, Math.round(num(r.years) * 12));
+  const emiOutlay = emiRes.emi * buyMonths;
+  const maintenanceOutlay = price * num(r.maintPct) / 100 * horizon;
+  const totalBuyOutlay = downPayment + emiOutlay + maintenanceOutlay;
+
+  let rentOutlay = 0;
+  let rent = num(r.rent) * 12;
+  for (let y = 0; y < horizon; y++) {
+    rentOutlay += rent;
+    rent *= 1 + num(r.rentApprPct) / 100;
+  }
+
+  const projectedValue = price * Math.pow(1 + num(r.apprPct) / 100, horizon);
+  const diff = totalBuyOutlay - rentOutlay;
+  return { downPayment, loanAmount, emi: emiRes.emi, totalBuyOutlay, rentOutlay, projectedValue, diff, horizon };
+}
 
 /* ---------------- Land unit conversions (cent / acre) ---------------- */
 const CENTS_PER_ACRE = 100;
@@ -197,7 +336,14 @@ const state = {
   openContactId: null,
   openContactIsNew: false,
   contactDraft: null,
-  quickCalc: { unit: "cent", mode: "rate", area: 0, ratePerUnit: 0, totalPrice: 0 }
+  quickCalc: { unit: "cent", mode: "rate", area: 0, ratePerUnit: 0, totalPrice: 0 },
+  qcTool: "land",
+  rentVsBuy: { price: 0, downPct: 20, ratePct: 8.5, years: 20, rent: 0, rentApprPct: 5, maintPct: 1, apprPct: 6, horizonYears: 10 },
+  registerSearch: "",
+  registerSort: "updated",
+  showArchived: false,
+  selectMode: false,
+  selectedIds: new Set()
 };
 
 const STATUS_LIST = ["All", "Interested", "Viewing", "Negotiating", "Purchased", "Dropped"];
@@ -206,7 +352,7 @@ const ROLE_LIST = ["Broker", "Owner", "Agent", "Builder", "Other"];
 
 /* ---------------- Data load ---------------- */
 async function loadAll() {
-  state.properties = await idbGetAll("properties");
+  state.properties = (await idbGetAll("properties")).map(ensurePropertyShape);
   state.contacts = await idbGetAll("contacts");
   state.properties.sort((a, b) => b.updatedAt - a.updatedAt);
   state.contacts.sort((a, b) => a.name.localeCompare(b.name));
@@ -226,7 +372,8 @@ function switchView(view) {
   if (view === "register") renderRegister();
   if (view === "contacts") renderContacts();
   if (view === "compare") renderCompare();
-  if (view === "quickcalc") renderQuickCalc();
+  if (view === "quickcalc") { renderQuickCalc(); renderRentVsBuy(); }
+  if (view === "settings") renderSettings();
 }
 
 /* ---------------- Register view ---------------- */
@@ -244,11 +391,98 @@ function renderFilterChips() {
   });
 }
 
+function getFilteredSortedProperties() {
+  let items = state.properties;
+  if (!state.showArchived) items = items.filter((p) => !p.archived);
+  if (state.statusFilter !== "All") items = items.filter((p) => p.status === state.statusFilter);
+  const q = state.registerSearch.trim().toLowerCase();
+  if (q) {
+    items = items.filter((p) => {
+      const hay = [p.title, p.location, p.notes, ...(p.tags || [])].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }
+  const cmp = {
+    "updated": (a, b) => b.updatedAt - a.updatedAt,
+    "price-desc": (a, b) => num(b.price) - num(a.price),
+    "price-asc": (a, b) => num(a.price) - num(b.price),
+    "pps-desc": (a, b) => (pricePerSqft(b.price, b.areaSqft) || 0) - (pricePerSqft(a.price, a.areaSqft) || 0),
+    "pps-asc": (a, b) => (pricePerSqft(a.price, a.areaSqft) || 0) - (pricePerSqft(b.price, b.areaSqft) || 0),
+    "status": (a, b) => a.status.localeCompare(b.status)
+  }[state.registerSort] || (() => 0);
+  items = items.slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || cmp(a, b));
+  return items;
+}
+
+function renderFollowUps() {
+  const wrap = document.getElementById("reg-followups");
+  const today = todayISO();
+  const due = state.properties
+    .filter((p) => !p.archived && p.followUp && p.followUp.date && p.followUp.date <= today)
+    .sort((a, b) => a.followUp.date.localeCompare(b.followUp.date));
+  if (due.length === 0) { wrap.innerHTML = ""; return; }
+  wrap.innerHTML = `
+    <div class="followup-banner">
+      <p class="followup-banner-title">Follow-ups due (${due.length})</p>
+      ${due.map((p) => `
+        <div class="followup-item" data-id="${p.id}">
+          <span>${escapeHtml(p.title || "Untitled property")}${p.followUp.note ? " — " + escapeHtml(p.followUp.note) : ""}</span>
+          <span class="date">${p.followUp.date}</span>
+        </div>`).join("")}
+    </div>`;
+  wrap.querySelectorAll(".followup-item").forEach((row) => {
+    row.addEventListener("click", () => openPropertyOverlay(row.dataset.id));
+  });
+}
+
+function renderBulkBar() {
+  const bar = document.getElementById("reg-bulkbar");
+  if (!state.selectMode || state.selectedIds.size === 0) { bar.classList.add("hidden"); bar.innerHTML = ""; return; }
+  bar.classList.remove("hidden");
+  bar.innerHTML = `
+    <span class="count">${state.selectedIds.size} selected</span>
+    <select id="bulk-status">
+      <option value="">Set status…</option>
+      ${STATUS_LIST.filter((s) => s !== "All").map((s) => `<option value="${s}">${s}</option>`).join("")}
+    </select>
+    <button id="bulk-archive">Archive</button>
+    <button id="bulk-delete" class="danger">Delete</button>
+  `;
+  bar.querySelector("#bulk-status").addEventListener("change", async (e) => {
+    if (!e.target.value) return;
+    await doBulkAction("status", e.target.value);
+  });
+  bar.querySelector("#bulk-archive").addEventListener("click", () => doBulkAction("archive"));
+  bar.querySelector("#bulk-delete").addEventListener("click", () => doBulkAction("delete"));
+}
+
+async function doBulkAction(type, value) {
+  const ids = Array.from(state.selectedIds);
+  if (type === "delete" && !confirm(`Delete ${ids.length} propert${ids.length === 1 ? "y" : "ies"}?`)) return;
+  for (const id of ids) {
+    if (type === "delete") { await idbDelete("properties", id); continue; }
+    const p = state.properties.find((x) => x.id === id);
+    if (!p) continue;
+    if (type === "status") p.status = value;
+    if (type === "archive") p.archived = true;
+    p.updatedAt = Date.now();
+    await idbPut("properties", p);
+  }
+  state.selectedIds.clear();
+  state.selectMode = false;
+  await loadAll();
+  renderRegister();
+  toast("Done");
+}
+
 function renderRegister() {
   const list = document.getElementById("register-list");
   const empty = document.getElementById("register-empty");
-  let items = state.properties;
-  if (state.statusFilter !== "All") items = items.filter((p) => p.status === state.statusFilter);
+  renderFollowUps();
+  renderBulkBar();
+  document.getElementById("reg-select-btn").textContent = state.selectMode ? "Cancel" : "Select";
+
+  const items = getFilteredSortedProperties();
 
   if (items.length === 0) {
     list.innerHTML = "";
@@ -260,11 +494,13 @@ function renderRegister() {
   list.innerHTML = items.map((p) => {
     const pps = pricePerSqft(p.price, p.areaSqft);
     return `
-      <div class="ledger-row" data-id="${p.id}">
+      <div class="ledger-row ${state.selectMode ? "selectable" : ""}" data-id="${p.id}">
+        ${state.selectMode ? `<input type="checkbox" class="ledger-checkbox" ${state.selectedIds.has(p.id) ? "checked" : ""} />` : ""}
         <div class="ledger-main">
-          <p class="ledger-title">${escapeHtml(p.title || "Untitled property")}</p>
+          <p class="ledger-title">${p.pinned ? '<span class="pin-mark">★</span>' : ""}${escapeHtml(p.title || "Untitled property")}${p.archived ? '<span class="archived-mark">Archived</span>' : ""}</p>
           <p class="ledger-sub">${escapeHtml(p.location || "—")} · ${escapeHtml(p.type)}</p>
           <span class="status-tag status-${p.status}">${p.status}</span>
+          ${p.tags && p.tags.length ? `<div class="tag-row">${p.tags.map((t) => `<span class="tag-chip">${escapeHtml(t)}</span>`).join("")}</div>` : ""}
         </div>
         <div class="ledger-figures">
           <div class="ledger-price">${fmtINR(p.price)}</div>
@@ -274,7 +510,36 @@ function renderRegister() {
   }).join("");
 
   list.querySelectorAll(".ledger-row").forEach((row) => {
-    row.addEventListener("click", () => openPropertyOverlay(row.dataset.id));
+    row.addEventListener("click", (e) => {
+      const id = row.dataset.id;
+      if (state.selectMode) {
+        if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+        else state.selectedIds.add(id);
+        renderRegister();
+        return;
+      }
+      openPropertyOverlay(id);
+    });
+  });
+}
+
+function wireRegisterControls() {
+  document.getElementById("reg-search").addEventListener("input", (e) => {
+    state.registerSearch = e.target.value;
+    renderRegister();
+  });
+  document.getElementById("reg-sort").addEventListener("change", (e) => {
+    state.registerSort = e.target.value;
+    renderRegister();
+  });
+  document.getElementById("reg-archived").addEventListener("change", (e) => {
+    state.showArchived = e.target.checked;
+    renderRegister();
+  });
+  document.getElementById("reg-select-btn").addEventListener("click", () => {
+    state.selectMode = !state.selectMode;
+    if (!state.selectMode) state.selectedIds.clear();
+    renderRegister();
   });
 }
 
@@ -312,6 +577,8 @@ function renderPropertyTabs() {
 async function savePropertyDraft(showToast = true) {
   const d = state.propertyDraft;
   d.updatedAt = Date.now();
+  const lastPrice = d.priceHistory.length ? d.priceHistory[d.priceHistory.length - 1].price : null;
+  if (lastPrice !== d.price) d.priceHistory.push({ date: todayISO(), price: d.price });
   await idbPut("properties", d);
   await loadAll();
   state.openPropertyIsNew = false;
@@ -360,11 +627,46 @@ function renderPropertyBody() {
           ${state.contacts.map((c) => `<option value="${c.id}" ${c.id === d.contactId ? "selected" : ""}>${escapeHtml(c.name)} (${c.role})</option>`).join("")}
         </select>
       </div>
+      <div class="field-row">
+        <div class="field"><label>BHK</label><input type="text" id="f-bhk" value="${escapeHtml(d.detail.bhk)}" placeholder="e.g. 3" /></div>
+        <div class="field"><label>Floor</label><input type="text" id="f-floor" value="${escapeHtml(d.detail.floor)}" placeholder="e.g. 4 of 8" /></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Facing</label><input type="text" id="f-facing" value="${escapeHtml(d.detail.facing)}" placeholder="e.g. East" /></div>
+        <div class="field"><label>Age (years)</label><input type="text" id="f-age" value="${escapeHtml(d.detail.ageYears)}" placeholder="e.g. 5" /></div>
+      </div>
+      <div class="field">
+        <label>Amenities</label>
+        <div class="chip-row" id="f-amenities" style="overflow-x:visible;flex-wrap:wrap;">
+          ${AMENITY_LIST.map((a) => `<button type="button" class="chip ${d.amenities.includes(a) ? "active" : ""}" data-amenity="${escapeHtml(a)}">${a}</button>`).join("")}
+        </div>
+      </div>
+      <div class="field">
+        <label>Tags (comma separated)</label>
+        <input type="text" id="f-tags" value="${escapeHtml((d.tags || []).join(", "))}" placeholder="e.g. corner plot, near school" />
+      </div>
+      <div class="field">
+        <label>Map link</label>
+        <input type="text" id="f-maplink" value="${escapeHtml(d.mapLink)}" placeholder="Paste a Google Maps URL" />
+        ${d.mapLink ? `<div class="action-links"><a href="${escapeHtml(d.mapLink)}" target="_blank" rel="noopener">Open in Maps</a></div>` : ""}
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Follow-up date</label><input type="date" id="f-followup-date" value="${d.followUp.date || ""}" /></div>
+        <div class="field"><label>Follow-up note</label><input type="text" id="f-followup-note" value="${escapeHtml(d.followUp.note)}" placeholder="e.g. Call broker" /></div>
+      </div>
+      <div class="field-row">
+        <label class="checkbox-inline"><input type="checkbox" id="f-pinned" ${d.pinned ? "checked" : ""} /> Pinned</label>
+        <label class="checkbox-inline"><input type="checkbox" id="f-archived" ${d.archived ? "checked" : ""} /> Archived</label>
+      </div>
       <div class="field">
         <label>Notes</label>
         <textarea id="f-notes" placeholder="Anything worth remembering">${escapeHtml(d.notes)}</textarea>
       </div>
       <button class="btn-primary" id="f-save">Save property</button>
+      ${!state.openPropertyIsNew ? `
+        <button class="btn-secondary" id="f-share">Share property</button>
+        <button class="btn-secondary" id="f-duplicate">Duplicate property</button>
+      ` : ""}
     `;
     body.querySelector("#f-title").addEventListener("input", (e) => (d.title = e.target.value));
     body.querySelector("#f-location").addEventListener("input", (e) => (d.location = e.target.value));
@@ -373,10 +675,45 @@ function renderPropertyBody() {
     body.querySelector("#f-price").addEventListener("input", (e) => (d.price = parsePrice(e.target.value)));
     body.querySelector("#f-area").addEventListener("input", (e) => (d.areaSqft = num(e.target.value)));
     body.querySelector("#f-contact").addEventListener("change", (e) => (d.contactId = e.target.value));
+    body.querySelector("#f-bhk").addEventListener("input", (e) => (d.detail.bhk = e.target.value));
+    body.querySelector("#f-floor").addEventListener("input", (e) => (d.detail.floor = e.target.value));
+    body.querySelector("#f-facing").addEventListener("input", (e) => (d.detail.facing = e.target.value));
+    body.querySelector("#f-age").addEventListener("input", (e) => (d.detail.ageYears = e.target.value));
+    body.querySelectorAll("#f-amenities .chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const a = chip.dataset.amenity;
+        const idx = d.amenities.indexOf(a);
+        if (idx >= 0) d.amenities.splice(idx, 1); else d.amenities.push(a);
+        chip.classList.toggle("active");
+      });
+    });
+    body.querySelector("#f-tags").addEventListener("input", (e) => {
+      d.tags = e.target.value.split(",").map((t) => t.trim()).filter(Boolean);
+    });
+    body.querySelector("#f-maplink").addEventListener("input", (e) => (d.mapLink = e.target.value));
+    body.querySelector("#f-followup-date").addEventListener("input", (e) => (d.followUp.date = e.target.value));
+    body.querySelector("#f-followup-note").addEventListener("input", (e) => (d.followUp.note = e.target.value));
+    body.querySelector("#f-pinned").addEventListener("change", (e) => (d.pinned = e.target.checked));
+    body.querySelector("#f-archived").addEventListener("change", (e) => (d.archived = e.target.checked));
     body.querySelector("#f-notes").addEventListener("input", (e) => (d.notes = e.target.value));
     body.querySelector("#f-save").addEventListener("click", async () => {
       if (!d.title.trim()) { toast("Give it a title first"); return; }
       await savePropertyDraft();
+      renderRegister();
+    });
+    const shareBtn = body.querySelector("#f-share");
+    if (shareBtn) shareBtn.addEventListener("click", () => shareText(buildPropertyShareText(d), d.title || "Property"));
+    const dupBtn = body.querySelector("#f-duplicate");
+    if (dupBtn) dupBtn.addEventListener("click", async () => {
+      const clone = JSON.parse(JSON.stringify(d));
+      clone.id = uid();
+      clone.title = (d.title || "Untitled") + " (copy)";
+      clone.createdAt = clone.updatedAt = Date.now();
+      clone.priceHistory = [];
+      await idbPut("properties", clone);
+      await loadAll();
+      toast("Duplicated");
+      openPropertyOverlay(clone.id);
       renderRegister();
     });
   }
@@ -396,6 +733,12 @@ function renderPropertyBody() {
       <div class="field"><label>Other charges (₹, flat)</label><input type="text" inputmode="decimal" id="c-other" value="${c.otherCharges}" placeholder="e.g. 50000, 1L" /></div>
       <div id="cost-results"></div>
       <button class="btn-primary" id="f-save-cost">Save</button>
+      ${d.priceHistory.length > 1 ? `
+        <div class="section-head" style="padding-top:14px;"><h2 style="font-size:14px;">Price history</h2></div>
+        <div class="result-block">
+          ${d.priceHistory.slice().reverse().map((h) => `<div class="result-row"><span>${h.date}</span><span class="val">${fmtINR(h.price)}</span></div>`).join("")}
+        </div>
+      ` : ""}
     `;
     const recompute = () => renderCostResults(d);
     body.querySelector("#c-reg").addEventListener("input", (e) => { c.registrationPct = num(e.target.value); recompute(); });
@@ -419,12 +762,48 @@ function renderPropertyBody() {
       </div>
       <div id="emi-results"></div>
       <button class="btn-primary" id="f-save-emi">Save</button>
+
+      <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Prepayment impact</h2></div>
+      <p class="hint">See how paying extra shortens the loan.</p>
+      <div class="field-row">
+        <div class="field"><label>Extra monthly (₹)</label><input type="text" inputmode="decimal" id="e-extra-monthly" value="${e_.extraMonthly || ""}" placeholder="e.g. 5000" /></div>
+        <div class="field"><label>Extra one-time now (₹)</label><input type="text" inputmode="decimal" id="e-extra-lump" value="${e_.extraOneTime || ""}" placeholder="e.g. 1L" /></div>
+      </div>
+      <div id="prepay-results"></div>
+
+      <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Compare loan scenarios</h2></div>
+      <p class="hint">Line up different lenders/offers for this property.</p>
+      <div id="scenario-list"></div>
+      <div class="field-row">
+        <div class="field"><label>Name</label><input type="text" id="ls-name" placeholder="e.g. SBI" /></div>
+        <div class="field"><label>Loan (₹)</label><input type="text" inputmode="decimal" id="ls-loan" placeholder="e.g. 36L" /></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Rate %</label><input type="number" step="0.05" id="ls-rate" placeholder="8.5" /></div>
+        <div class="field"><label>Years</label><input type="number" id="ls-years" placeholder="20" /></div>
+      </div>
+      <button class="btn-secondary" id="ls-add">Add scenario</button>
     `;
-    const recompute = () => renderEmiResults(d);
+    const recompute = () => { renderEmiResults(d); renderPrepayResults(d); renderScenarioList(d); };
     body.querySelector("#e-loan").addEventListener("input", (ev) => { e_.loanAmount = parsePrice(ev.target.value); e_._touched = true; recompute(); });
     body.querySelector("#e-rate").addEventListener("input", (ev) => { e_.interestRatePct = num(ev.target.value); recompute(); });
     body.querySelector("#e-years").addEventListener("input", (ev) => { e_.tenureYears = num(ev.target.value); recompute(); });
+    body.querySelector("#e-extra-monthly").addEventListener("input", (ev) => { e_.extraMonthly = parsePrice(ev.target.value); renderPrepayResults(d); });
+    body.querySelector("#e-extra-lump").addEventListener("input", (ev) => { e_.extraOneTime = parsePrice(ev.target.value); renderPrepayResults(d); });
     body.querySelector("#f-save-emi").addEventListener("click", async () => { await savePropertyDraft(); });
+    body.querySelector("#ls-add").addEventListener("click", async () => {
+      const name = body.querySelector("#ls-name").value.trim();
+      if (!name) { toast("Give the scenario a name"); return; }
+      d.loanScenarios.push({
+        id: uid(),
+        name,
+        loanAmount: parsePrice(body.querySelector("#ls-loan").value),
+        interestRatePct: num(body.querySelector("#ls-rate").value, 8.5),
+        tenureYears: num(body.querySelector("#ls-years").value, 20)
+      });
+      await savePropertyDraft(false);
+      renderPropertyBody();
+    });
     recompute();
   }
 
@@ -449,6 +828,83 @@ function renderPropertyBody() {
     body.querySelector("#f-save-roi").addEventListener("click", async () => { await savePropertyDraft(); });
     recompute();
   }
+
+  if (state.propertyTab === "checklist") {
+    body.innerHTML = `
+      <div id="checklist-items"></div>
+      <div class="field-row">
+        <div class="field"><input type="text" id="cl-new" placeholder="Add a checklist item" /></div>
+      </div>
+      <button class="btn-secondary" id="cl-add">Add item</button>
+    `;
+    const renderItems = () => {
+      const wrap = body.querySelector("#checklist-items");
+      wrap.innerHTML = d.checklist.map((item) => `
+        <div class="checklist-item ${item.checked ? "checked" : ""}" data-id="${item.id}">
+          <input type="checkbox" ${item.checked ? "checked" : ""} />
+          <label>${escapeHtml(item.label)}</label>
+          <button class="row-remove" data-remove="${item.id}">&times;</button>
+        </div>`).join("") || `<p class="hint">No checklist items yet.</p>`;
+      wrap.querySelectorAll(".checklist-item input[type=checkbox]").forEach((cb) => {
+        cb.addEventListener("change", async () => {
+          const id = cb.closest(".checklist-item").dataset.id;
+          d.checklist.find((i) => i.id === id).checked = cb.checked;
+          await savePropertyDraft(false);
+          renderItems();
+        });
+      });
+      wrap.querySelectorAll("[data-remove]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          d.checklist = d.checklist.filter((i) => i.id !== btn.dataset.remove);
+          await savePropertyDraft(false);
+          renderItems();
+        });
+      });
+    };
+    body.querySelector("#cl-add").addEventListener("click", async () => {
+      const input = body.querySelector("#cl-new");
+      const label = input.value.trim();
+      if (!label) return;
+      d.checklist.push({ id: uid(), label, checked: false });
+      input.value = "";
+      await savePropertyDraft(false);
+      renderItems();
+    });
+    renderItems();
+  }
+
+  if (state.propertyTab === "visits") {
+    body.innerHTML = `
+      <div id="visit-list"></div>
+      <div class="field"><label>Date</label><input type="date" id="v-date" value="${todayISO()}" /></div>
+      <div class="field"><label>Note</label><textarea id="v-note" placeholder="What did you notice?"></textarea></div>
+      <button class="btn-secondary" id="v-add">Log visit</button>
+    `;
+    const renderVisits = () => {
+      const wrap = body.querySelector("#visit-list");
+      const sorted = d.visits.slice().sort((a, b) => b.date.localeCompare(a.date));
+      wrap.innerHTML = sorted.map((v) => `
+        <div class="visit-entry" data-id="${v.id}">
+          <div class="visit-entry-head"><span>${v.date}</span><button class="row-remove" data-remove="${v.id}">&times;</button></div>
+          <p>${escapeHtml(v.note || "—")}</p>
+        </div>`).join("") || `<p class="hint">No visits logged yet.</p>`;
+      wrap.querySelectorAll("[data-remove]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          d.visits = d.visits.filter((v) => v.id !== btn.dataset.remove);
+          await savePropertyDraft(false);
+          renderVisits();
+        });
+      });
+    };
+    body.querySelector("#v-add").addEventListener("click", async () => {
+      const date = body.querySelector("#v-date").value || todayISO();
+      const note = body.querySelector("#v-note").value.trim();
+      d.visits.push({ id: uid(), date, note });
+      await savePropertyDraft(false);
+      renderPropertyBody();
+    });
+    renderVisits();
+  }
 }
 
 function renderCostResults(d) {
@@ -468,14 +924,61 @@ function renderCostResults(d) {
 }
 function renderEmiResults(d) {
   const r = calcEMI(d.emi.loanAmount, d.emi.interestRatePct, d.emi.tenureYears);
+  const budgetRow = settings.budgetMonthly > 0
+    ? `<div class="result-row ${r.emi <= settings.budgetMonthly ? "positive" : ""}"><span>Within budget (${fmtINR(settings.budgetMonthly)}/mo)?</span><span class="val">${r.emi <= settings.budgetMonthly ? "Yes" : "No"}</span></div>`
+    : "";
   document.getElementById("emi-results").innerHTML = `
     <div class="result-block">
       <div class="result-row total"><span>Monthly EMI</span><span class="val">${fmtINR(r.emi)}</span></div>
       <div class="result-row"><span>Total interest</span><span class="val">${fmtINR(r.totalInterest)}</span></div>
       <div class="result-row"><span>Total repayment</span><span class="val">${fmtINR(r.totalPayment)}</span></div>
       <div class="result-row"><span>Number of EMIs</span><span class="val">${r.n}</span></div>
+      ${budgetRow}
     </div>
   `;
+}
+function renderPrepayResults(d) {
+  const el = document.getElementById("prepay-results");
+  if (!el) return;
+  const e_ = d.emi;
+  if (!num(e_.extraMonthly) && !num(e_.extraOneTime)) {
+    el.innerHTML = `<p class="hint">Add an extra payment above to see the impact.</p>`;
+    return;
+  }
+  const res = calcPrepayment(e_.loanAmount, e_.interestRatePct, e_.tenureYears, e_.extraMonthly, e_.extraOneTime);
+  if (!res.valid) {
+    el.innerHTML = `<p class="hint">Extra payment too small relative to interest — can't project a payoff.</p>`;
+    return;
+  }
+  const years = Math.floor(res.months / 12);
+  const months = res.months % 12;
+  el.innerHTML = `
+    <div class="result-block">
+      <div class="result-row total"><span>New payoff time</span><span class="val">${years}y ${months}m</span></div>
+      <div class="result-row positive"><span>Interest saved</span><span class="val">${fmtINR(res.interestSaved)}</span></div>
+      <div class="result-row"><span>Original tenure</span><span class="val">${Math.floor(res.baselineMonths / 12)}y ${res.baselineMonths % 12}m</span></div>
+    </div>
+  `;
+}
+function renderScenarioList(d) {
+  const el = document.getElementById("scenario-list");
+  if (!el) return;
+  if (d.loanScenarios.length === 0) { el.innerHTML = `<p class="hint">No scenarios added yet.</p>`; return; }
+  el.innerHTML = d.loanScenarios.map((s) => {
+    const r = calcEMI(s.loanAmount, s.interestRatePct, s.tenureYears);
+    return `
+      <div class="scenario-row" data-id="${s.id}">
+        <span>${escapeHtml(s.name)} <span class="hint" style="margin:0;">${fmtINR(s.loanAmount)} · ${s.interestRatePct}% · ${s.tenureYears}y</span></span>
+        <span class="val">${fmtINR(r.emi)}/mo <button class="row-remove" data-remove="${s.id}">&times;</button></span>
+      </div>`;
+  }).join("");
+  el.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      d.loanScenarios = d.loanScenarios.filter((s) => s.id !== btn.dataset.remove);
+      await savePropertyDraft(false);
+      renderPropertyBody();
+    });
+  });
 }
 function renderRoiResults(d) {
   const cost = calcCostBreakdown(d).total;
@@ -554,8 +1057,16 @@ function renderContactBody() {
       <div class="field"><label>Phone</label><input type="text" id="k-phone" value="${escapeHtml(d.phone)}" /></div>
       <div class="field"><label>Email</label><input type="text" id="k-email" value="${escapeHtml(d.email)}" /></div>
     </div>
+    ${(d.phone || d.email) ? `
+      <div class="action-links">
+        ${d.phone ? `<a href="tel:${escapeHtml(d.phone)}">Call</a>` : ""}
+        ${d.phone ? `<a href="https://wa.me/${escapeHtml(d.phone.replace(/[^\d]/g, ""))}" target="_blank" rel="noopener">WhatsApp</a>` : ""}
+        ${d.email ? `<a href="mailto:${escapeHtml(d.email)}">Email</a>` : ""}
+      </div>
+    ` : ""}
     <div class="field"><label>Notes</label><textarea id="k-notes">${escapeHtml(d.notes)}</textarea></div>
     <button class="btn-primary" id="k-save">Save contact</button>
+    ${!state.openContactIsNew ? renderLinkedPropertiesBlock(d.id) : ""}
   `;
   body.querySelector("#k-name").addEventListener("input", (e) => (d.name = e.target.value));
   body.querySelector("#k-role").addEventListener("change", (e) => (d.role = e.target.value));
@@ -571,6 +1082,20 @@ function renderContactBody() {
     toast("Saved");
     renderContacts();
   });
+  body.querySelectorAll(".linked-prop-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      closeContactOverlay();
+      openPropertyOverlay(row.dataset.id);
+    });
+  });
+}
+function renderLinkedPropertiesBlock(contactId) {
+  const linked = state.properties.filter((p) => p.contactId === contactId);
+  if (linked.length === 0) return "";
+  return `
+    <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Linked properties</h2></div>
+    ${linked.map((p) => `<div class="linked-prop-row" data-id="${p.id}">${escapeHtml(p.title || "Untitled property")} — ${fmtINR(p.price)}</div>`).join("")}
+  `;
 }
 
 /* ---------------- Compare view ---------------- */
@@ -594,11 +1119,15 @@ function renderCompare() {
   });
 
   const wrap = document.getElementById("compare-table-wrap");
+  const shareBtn = document.getElementById("btn-share-compare");
   const selected = state.properties.filter((p) => state.compareSelected.has(p.id));
   if (selected.length === 0) {
     wrap.innerHTML = `<p class="empty-state">Select properties above to compare price, cost, and returns side by side.</p>`;
+    shareBtn.classList.add("hidden");
     return;
   }
+  shareBtn.classList.remove("hidden");
+  shareBtn.onclick = () => shareText(buildCompareShareText(selected), "Property comparison");
 
   const rows = [
     ["Location", (p) => escapeHtml(p.location || "—")],
@@ -612,6 +1141,14 @@ function renderCompare() {
     ["Net rental yield", (p) => fmtPct(calcRental(calcCostBreakdown(p).total, p.rental).netYieldPct)],
     ["Annualised ROI", (p) => fmtPct(calcRental(calcCostBreakdown(p).total, p.rental).annualizedROIPct)]
   ];
+  if (settings.budgetMonthly > 0) {
+    rows.push(["Within budget?", (p) => {
+      const t = calcCostBreakdown(p).total;
+      const loan = p.emi.loanAmount || Math.round(t * 0.8);
+      const emi = calcEMI(loan, p.emi.interestRatePct, p.emi.tenureYears).emi;
+      return emi <= settings.budgetMonthly ? "Yes" : "No";
+    }]);
+  }
 
   wrap.innerHTML = `
     <table class="compare-table">
@@ -714,10 +1251,139 @@ function recomputeQuickCalc() {
   `;
 }
 
+function renderRentVsBuy() {
+  const rvb = state.rentVsBuy;
+  const body = document.getElementById("rentvsbuy-body");
+  body.innerHTML = `
+    <div class="field-row">
+      <div class="field"><label>Property price (₹)</label><input type="text" inputmode="decimal" id="rvb-price" value="${rvb.price || ""}" placeholder="e.g. 60L" /></div>
+      <div class="field"><label>Down payment %</label><input type="number" id="rvb-down" value="${rvb.downPct}" /></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Loan rate % p.a.</label><input type="number" step="0.05" id="rvb-rate" value="${rvb.ratePct}" /></div>
+      <div class="field"><label>Loan tenure (years)</label><input type="number" id="rvb-years" value="${rvb.years}" /></div>
+    </div>
+    <div class="field"><label>Equivalent monthly rent (₹)</label><input type="text" inputmode="decimal" id="rvb-rent" value="${rvb.rent || ""}" placeholder="e.g. 20000" /></div>
+    <div class="field-row">
+      <div class="field"><label>Rent increase % p.a.</label><input type="number" step="0.1" id="rvb-rentappr" value="${rvb.rentApprPct}" /></div>
+      <div class="field"><label>Maintenance % of price p.a.</label><input type="number" step="0.1" id="rvb-maint" value="${rvb.maintPct}" /></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Property appreciation % p.a.</label><input type="number" step="0.1" id="rvb-apprpct" value="${rvb.apprPct}" /></div>
+      <div class="field"><label>Horizon (years)</label><input type="number" id="rvb-horizon" value="${rvb.horizonYears}" /></div>
+    </div>
+    <div id="rvb-results"></div>
+  `;
+  const ids = {
+    "rvb-price": (v) => (rvb.price = parsePrice(v)),
+    "rvb-down": (v) => (rvb.downPct = num(v)),
+    "rvb-rate": (v) => (rvb.ratePct = num(v)),
+    "rvb-years": (v) => (rvb.years = num(v)),
+    "rvb-rent": (v) => (rvb.rent = parsePrice(v)),
+    "rvb-rentappr": (v) => (rvb.rentApprPct = num(v)),
+    "rvb-maint": (v) => (rvb.maintPct = num(v)),
+    "rvb-apprpct": (v) => (rvb.apprPct = num(v)),
+    "rvb-horizon": (v) => (rvb.horizonYears = num(v))
+  };
+  Object.keys(ids).forEach((id) => {
+    body.querySelector("#" + id).addEventListener("input", (e) => { ids[id](e.target.value); recomputeRentVsBuy(); });
+  });
+  recomputeRentVsBuy();
+}
+function recomputeRentVsBuy() {
+  const results = document.getElementById("rvb-results");
+  if (!results) return;
+  const r = calcRentVsBuy(state.rentVsBuy);
+  const cheaper = r.diff <= 0 ? "Buying" : "Renting";
+  results.innerHTML = `
+    <div class="result-block">
+      <div class="result-row"><span>Down payment</span><span class="val">${fmtINR(r.downPayment)}</span></div>
+      <div class="result-row"><span>Monthly EMI</span><span class="val">${fmtINR(r.emi)}</span></div>
+      <div class="result-row"><span>Total buying outlay, ${r.horizon}y</span><span class="val">${fmtINR(r.totalBuyOutlay)}</span></div>
+      <div class="result-row"><span>Total renting outlay, ${r.horizon}y</span><span class="val">${fmtINR(r.rentOutlay)}</span></div>
+      <div class="result-row total"><span>${cheaper} looks cheaper by</span><span class="val">${fmtINR(Math.abs(r.diff))}</span></div>
+      <div class="result-row"><span>Property value at end (excluded above)</span><span class="val">${fmtINR(r.projectedValue)}</span></div>
+    </div>
+    <p class="hint">Rough estimate — excludes tax benefits, investing the rent-saved difference, and resale costs.</p>
+  `;
+}
+
+/* ---------------- Settings view ---------------- */
+function renderSettings() {
+  document.querySelectorAll("#set-currency-toggle button").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === settings.currencyMode);
+  });
+  document.getElementById("set-budget").value = settings.budgetMonthly || "";
+}
+function wireSettings() {
+  document.querySelectorAll("#set-currency-toggle button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      settings.currencyMode = btn.dataset.mode;
+      saveSettings();
+      renderSettings();
+    });
+  });
+  document.getElementById("set-budget").addEventListener("input", (e) => {
+    settings.budgetMonthly = parsePrice(e.target.value);
+    saveSettings();
+  });
+  document.getElementById("btn-export").addEventListener("click", exportData);
+  document.getElementById("btn-import").addEventListener("click", () => document.getElementById("file-import").click());
+  document.getElementById("file-import").addEventListener("change", (e) => {
+    if (e.target.files[0]) importDataFile(e.target.files[0]);
+    e.target.value = "";
+  });
+}
+function exportData() {
+  const data = { version: 1, exportedAt: Date.now(), properties: state.properties, contacts: state.contacts, settings };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "property-register-backup-" + todayISO() + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast("Exported");
+}
+async function importDataFile(file) {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if (!data || (!Array.isArray(data.properties) && !Array.isArray(data.contacts))) throw new Error("bad file");
+    if (!confirm("Import will add or overwrite entries with matching IDs. Continue?")) return;
+    for (const p of (data.properties || [])) await idbPut("properties", ensurePropertyShape(p));
+    for (const c of (data.contacts || [])) await idbPut("contacts", c);
+    if (data.settings) { Object.assign(settings, data.settings); saveSettings(); }
+    await loadAll();
+    renderRegister();
+    renderSettings();
+    toast("Imported");
+  } catch (e) {
+    toast("Import failed — invalid file");
+  }
+}
+
 /* ---------------- Wiring ---------------- */
+const QC_TOOL_SUB = {
+  land: "Convert between cent / acre rates and total price. Not saved with any property — just a scratch pad.",
+  rentvsbuy: "Rough rent-vs-buy comparison over a holding period. Not saved with any property — just a scratch pad."
+};
 function wireStatic() {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchView(btn.dataset.view));
+  });
+  wireRegisterControls();
+  wireSettings();
+  document.querySelectorAll("#qc-tool-toggle button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.qcTool = btn.dataset.tool;
+      document.querySelectorAll("#qc-tool-toggle button").forEach((b) => b.classList.toggle("active", b === btn));
+      document.getElementById("qc-tool-sub").textContent = QC_TOOL_SUB[state.qcTool];
+      document.getElementById("quickcalc-body").classList.toggle("hidden", state.qcTool !== "land");
+      document.getElementById("rentvsbuy-body").classList.toggle("hidden", state.qcTool !== "rentvsbuy");
+    });
   });
   document.getElementById("btn-add-property").addEventListener("click", () => openPropertyOverlay(null));
   document.getElementById("prop-close").addEventListener("click", () => { closePropertyOverlay(); renderRegister(); });
