@@ -5,6 +5,45 @@
    Everything here is best-effort — the user always reviews/edits the
    resulting draft before it's saved. */
 
+/* ---------------- URL import (via local video-fetcher service) ---------------- */
+function openUrlImportOverlay() {
+  document.getElementById("url-import-input").value = "";
+  document.getElementById("url-import-status").textContent = "";
+  document.getElementById("overlay-url-import").classList.remove("hidden");
+}
+
+function closeUrlImportOverlay() {
+  document.getElementById("overlay-url-import").classList.add("hidden");
+}
+
+async function submitUrlImport() {
+  const input = document.getElementById("url-import-input");
+  const status = document.getElementById("url-import-status");
+  const url = input.value.trim();
+  if (!url) { status.textContent = "Paste a link first."; return; }
+  const endpoint = (settings.videoFetcherUrl || "").trim();
+  if (!endpoint) { status.textContent = "Set the fetcher service URL in Settings first."; return; }
+
+  status.textContent = "Fetching video from " + new URL(endpoint).host + "…";
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url })
+    });
+    if (!res.ok) {
+      let detail = "Server returned " + res.status;
+      try { const body = await res.json(); if (body && body.detail) detail = body.detail; } catch (e) {}
+      throw new Error(detail);
+    }
+    const blob = await res.blob();
+    closeUrlImportOverlay();
+    startVideoImport(blob);
+  } catch (e) {
+    status.textContent = "Couldn't fetch that video — " + e.message + ". Is the fetcher service running and reachable?";
+  }
+}
+
 function startVideoImport(blob) {
   openPropertyOverlay(null);
   const draft = state.propertyDraft;

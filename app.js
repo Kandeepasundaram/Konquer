@@ -90,9 +90,9 @@ function parsePrice(v, fallback = 0) {
 }
 function loadSettings() {
   try {
-    return Object.assign({ currencyMode: "inr", budgetMonthly: 0 }, JSON.parse(localStorage.getItem("prSettings") || "{}"));
+    return Object.assign({ currencyMode: "inr", budgetMonthly: 0, videoFetcherUrl: "http://localhost:8792/fetch" }, JSON.parse(localStorage.getItem("prSettings") || "{}"));
   } catch (e) {
-    return { currencyMode: "inr", budgetMonthly: 0 };
+    return { currencyMode: "inr", budgetMonthly: 0, videoFetcherUrl: "http://localhost:8792/fetch" };
   }
 }
 function saveSettings() {
@@ -1344,6 +1344,7 @@ function renderSettings() {
     btn.classList.toggle("active", btn.dataset.mode === settings.currencyMode);
   });
   document.getElementById("set-budget").value = settings.budgetMonthly || "";
+  document.getElementById("set-fetcher-url").value = settings.videoFetcherUrl || "";
 }
 function wireSettings() {
   document.querySelectorAll("#set-currency-toggle button").forEach((btn) => {
@@ -1355,6 +1356,10 @@ function wireSettings() {
   });
   document.getElementById("set-budget").addEventListener("input", (e) => {
     settings.budgetMonthly = parsePrice(e.target.value);
+    saveSettings();
+  });
+  document.getElementById("set-fetcher-url").addEventListener("input", (e) => {
+    settings.videoFetcherUrl = e.target.value.trim();
     saveSettings();
   });
   document.getElementById("btn-export").addEventListener("click", exportData);
@@ -1416,6 +1421,9 @@ function wireStatic() {
     });
   });
   document.getElementById("btn-add-property").addEventListener("click", () => openPropertyOverlay(null));
+  document.getElementById("btn-import-url").addEventListener("click", openUrlImportOverlay);
+  document.getElementById("url-import-close").addEventListener("click", closeUrlImportOverlay);
+  document.getElementById("url-import-fetch").addEventListener("click", submitUrlImport);
   document.getElementById("prop-close").addEventListener("click", () => { closePropertyOverlay(); renderRegister(); });
   document.getElementById("prop-delete").addEventListener("click", async () => {
     if (!confirm("Delete this property?")) return;

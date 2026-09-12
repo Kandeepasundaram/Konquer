@@ -41,6 +41,7 @@
       </div>
       <div class="register-toolbar">
         <label class="checkbox-inline"><input type="checkbox" id="reg-archived" /> Show archived</label>
+        <button id="btn-import-url" class="text-btn">Import from link</button>
         <button id="reg-select-btn" class="text-btn">Select</button>
       </div>
       <div id="reg-followups"></div>
@@ -97,6 +98,12 @@
       <div class="field">
         <label>Monthly budget, for EMI affordability checks (₹)</label>
         <input type="text" inputmode="decimal" id="set-budget" placeholder="e.g. 40000, 40k" />
+      </div>
+      <div class="section-head"><h2>Video import</h2></div>
+      <p class="section-sub">URL of your local video-fetcher service (see project README), used by "Import from link".</p>
+      <div class="field">
+        <label>Fetcher service URL</label>
+        <input type="text" id="set-fetcher-url" placeholder="http://localhost:8792/fetch" />
       </div>
       <div class="section-head"><h2>Backup</h2></div>
       <p class="section-sub">Everything lives only on this device. Export a copy now and then, or before switching phones.</p>
@@ -160,6 +167,25 @@
       <button class="text-btn danger hidden" id="contact-delete">Delete</button>
     </div>
     <div class="sheet-body" id="contact-body"></div>
+  </div>
+</div>
+
+<!-- URL import overlay -->
+<div id="overlay-url-import" class="overlay hidden">
+  <div class="sheet sheet-short">
+    <div class="sheet-head">
+      <button class="text-btn" id="url-import-close">Close</button>
+      <span>Import from link</span>
+      <span style="width:40px"></span>
+    </div>
+    <div class="sheet-body" id="url-import-body">
+      <div class="field">
+        <label>Instagram Reel / YouTube Short link</label>
+        <input type="url" id="url-import-input" placeholder="https://…" />
+      </div>
+      <p class="import-banner-note" id="url-import-status"></p>
+      <button class="btn-primary" id="url-import-fetch">Fetch &amp; import</button>
+    </div>
   </div>
 </div>
 
