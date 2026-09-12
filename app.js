@@ -58,6 +58,24 @@ function num(v, fallback = 0) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : fallback;
 }
+/* Accepts flexible Indian-style price entry: "3L", "3 lakhs", "3,00,000",
+   "4c", "4cr", "4 crores", "25k", plain "3000000", etc. */
+function parsePrice(v, fallback = 0) {
+  if (v === null || v === undefined) return fallback;
+  let s = String(v).trim();
+  if (!s) return fallback;
+  s = s.replace(/,/g, "");
+  const m = s.match(/^(-?\d*\.?\d+)\s*(crores?|cr|c|lakhs?|l|thousand|k)?$/i);
+  if (!m) return num(s, fallback);
+  let n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return fallback;
+  switch ((m[2] || "").toLowerCase()) {
+    case "cr": case "c": case "crore": case "crores": n *= 1e7; break;
+    case "l": case "lakh": case "lakhs": n *= 1e5; break;
+    case "k": case "thousand": n *= 1e3; break;
+  }
+  return n;
+}
 function fmtINR(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
   const rounded = Math.round(n);
@@ -328,7 +346,7 @@ function renderPropertyBody() {
       <div class="field-row">
         <div class="field">
           <label>Price (₹)</label>
-          <input type="number" id="f-price" value="${d.price || ""}" placeholder="0" />
+          <input type="text" inputmode="decimal" id="f-price" value="${d.price || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
         </div>
         <div class="field">
           <label>Area (sqft)</label>
@@ -352,7 +370,7 @@ function renderPropertyBody() {
     body.querySelector("#f-location").addEventListener("input", (e) => (d.location = e.target.value));
     body.querySelector("#f-type").addEventListener("change", (e) => (d.type = e.target.value));
     body.querySelector("#f-status").addEventListener("change", (e) => (d.status = e.target.value));
-    body.querySelector("#f-price").addEventListener("input", (e) => (d.price = num(e.target.value)));
+    body.querySelector("#f-price").addEventListener("input", (e) => (d.price = parsePrice(e.target.value)));
     body.querySelector("#f-area").addEventListener("input", (e) => (d.areaSqft = num(e.target.value)));
     body.querySelector("#f-contact").addEventListener("change", (e) => (d.contactId = e.target.value));
     body.querySelector("#f-notes").addEventListener("input", (e) => (d.notes = e.target.value));
@@ -375,7 +393,7 @@ function renderPropertyBody() {
         <div class="field"><label>Brokerage %</label><input type="number" step="0.1" id="c-brokerage" value="${c.brokeragePct}" /></div>
         <div class="field"><label>GST %</label><input type="number" step="0.1" id="c-gst" value="${c.gstPct}" /></div>
       </div>
-      <div class="field"><label>Other charges (₹, flat)</label><input type="number" id="c-other" value="${c.otherCharges}" /></div>
+      <div class="field"><label>Other charges (₹, flat)</label><input type="text" inputmode="decimal" id="c-other" value="${c.otherCharges}" placeholder="e.g. 50000, 1L" /></div>
       <div id="cost-results"></div>
       <button class="btn-primary" id="f-save-cost">Save</button>
     `;
@@ -384,7 +402,7 @@ function renderPropertyBody() {
     body.querySelector("#c-stamp").addEventListener("input", (e) => { c.stampDutyPct = num(e.target.value); recompute(); });
     body.querySelector("#c-brokerage").addEventListener("input", (e) => { c.brokeragePct = num(e.target.value); recompute(); });
     body.querySelector("#c-gst").addEventListener("input", (e) => { c.gstPct = num(e.target.value); recompute(); });
-    body.querySelector("#c-other").addEventListener("input", (e) => { c.otherCharges = num(e.target.value); recompute(); });
+    body.querySelector("#c-other").addEventListener("input", (e) => { c.otherCharges = parsePrice(e.target.value); recompute(); });
     body.querySelector("#f-save-cost").addEventListener("click", async () => { await savePropertyDraft(); });
     recompute();
   }
@@ -394,7 +412,7 @@ function renderPropertyBody() {
     if (state.openPropertyIsNew && !e_._touched && d.price) e_.loanAmount = Math.round(d.price * 0.8);
     body.innerHTML = `
       <p class="hint">Standard reducing-balance EMI on the loan amount you plan to borrow.</p>
-      <div class="field"><label>Loan amount (₹)</label><input type="number" id="e-loan" value="${e_.loanAmount || ""}" /></div>
+      <div class="field"><label>Loan amount (₹)</label><input type="text" inputmode="decimal" id="e-loan" value="${e_.loanAmount || ""}" placeholder="e.g. 36L, 0.4Cr" /></div>
       <div class="field-row">
         <div class="field"><label>Interest rate % p.a.</label><input type="number" step="0.05" id="e-rate" value="${e_.interestRatePct}" /></div>
         <div class="field"><label>Tenure (years)</label><input type="number" id="e-years" value="${e_.tenureYears}" /></div>
@@ -403,7 +421,7 @@ function renderPropertyBody() {
       <button class="btn-primary" id="f-save-emi">Save</button>
     `;
     const recompute = () => renderEmiResults(d);
-    body.querySelector("#e-loan").addEventListener("input", (ev) => { e_.loanAmount = num(ev.target.value); e_._touched = true; recompute(); });
+    body.querySelector("#e-loan").addEventListener("input", (ev) => { e_.loanAmount = parsePrice(ev.target.value); e_._touched = true; recompute(); });
     body.querySelector("#e-rate").addEventListener("input", (ev) => { e_.interestRatePct = num(ev.target.value); recompute(); });
     body.querySelector("#e-years").addEventListener("input", (ev) => { e_.tenureYears = num(ev.target.value); recompute(); });
     body.querySelector("#f-save-emi").addEventListener("click", async () => { await savePropertyDraft(); });
@@ -414,7 +432,7 @@ function renderPropertyBody() {
     const r = d.rental;
     body.innerHTML = `
       <p class="hint">Estimate rental yield and total return if you hold the property for a number of years.</p>
-      <div class="field"><label>Expected monthly rent (₹)</label><input type="number" id="r-rent" value="${r.monthlyRent || ""}" /></div>
+      <div class="field"><label>Expected monthly rent (₹)</label><input type="text" inputmode="decimal" id="r-rent" value="${r.monthlyRent || ""}" placeholder="e.g. 25000, 25k" /></div>
       <div class="field-row">
         <div class="field"><label>Annual expenses % of cost</label><input type="number" step="0.1" id="r-exp" value="${r.annualExpensesPct}" /></div>
         <div class="field"><label>Appreciation % p.a.</label><input type="number" step="0.1" id="r-appr" value="${r.appreciationPct}" /></div>
@@ -424,7 +442,7 @@ function renderPropertyBody() {
       <button class="btn-primary" id="f-save-roi">Save</button>
     `;
     const recompute = () => renderRoiResults(d);
-    body.querySelector("#r-rent").addEventListener("input", (ev) => { r.monthlyRent = num(ev.target.value); recompute(); });
+    body.querySelector("#r-rent").addEventListener("input", (ev) => { r.monthlyRent = parsePrice(ev.target.value); recompute(); });
     body.querySelector("#r-exp").addEventListener("input", (ev) => { r.annualExpensesPct = num(ev.target.value); recompute(); });
     body.querySelector("#r-appr").addEventListener("input", (ev) => { r.appreciationPct = num(ev.target.value); recompute(); });
     body.querySelector("#r-years").addEventListener("input", (ev) => { r.holdingYears = num(ev.target.value); recompute(); });
@@ -629,12 +647,12 @@ function renderQuickCalc() {
     ${q.mode === "rate" ? `
       <div class="field">
         <label>Rate per ${unitLabel} (₹)</label>
-        <input type="number" id="qc-rate" value="${q.ratePerUnit || ""}" placeholder="0" />
+        <input type="text" inputmode="decimal" id="qc-rate" value="${q.ratePerUnit || ""}" placeholder="e.g. 50000, 1L" />
       </div>
     ` : `
       <div class="field">
         <label>Total price (₹)</label>
-        <input type="number" id="qc-total" value="${q.totalPrice || ""}" placeholder="0" />
+        <input type="text" inputmode="decimal" id="qc-total" value="${q.totalPrice || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
       </div>
     `}
 
@@ -645,9 +663,9 @@ function renderQuickCalc() {
   body.querySelectorAll("[data-unit]").forEach((btn) => btn.addEventListener("click", () => { q.unit = btn.dataset.unit; renderQuickCalc(); }));
   body.querySelectorAll("[data-mode]").forEach((btn) => btn.addEventListener("click", () => { q.mode = btn.dataset.mode; renderQuickCalc(); }));
   if (q.mode === "rate") {
-    body.querySelector("#qc-rate").addEventListener("input", (e) => { q.ratePerUnit = num(e.target.value); recomputeQuickCalc(); });
+    body.querySelector("#qc-rate").addEventListener("input", (e) => { q.ratePerUnit = parsePrice(e.target.value); recomputeQuickCalc(); });
   } else {
-    body.querySelector("#qc-total").addEventListener("input", (e) => { q.totalPrice = num(e.target.value); recomputeQuickCalc(); });
+    body.querySelector("#qc-total").addEventListener("input", (e) => { q.totalPrice = parsePrice(e.target.value); recomputeQuickCalc(); });
   }
   recomputeQuickCalc();
 }
