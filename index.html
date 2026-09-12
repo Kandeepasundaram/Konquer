@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Property Register</title>
+<meta name="theme-color" content="#A63D2F" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;1,500&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <header class="topbar">
+    <div class="topbar-row">
+      <h1 class="brand">Property Register</h1>
+      <button id="btn-add-property" class="stamp-btn" aria-label="Add property">+</button>
+    </div>
+    <div id="filter-chips" class="chip-row" role="tablist" aria-label="Filter by status"></div>
+  </header>
+
+  <main id="main">
+
+    <section id="view-register" class="view">
+      <div id="register-list" class="ledger"></div>
+      <p id="register-empty" class="empty-state hidden">
+        No entries yet. Tap <strong>+</strong> to add the first property you're tracking.
+      </p>
+    </section>
+
+    <section id="view-compare" class="view hidden">
+      <div class="section-head">
+        <h2>Compare</h2>
+        <p class="section-sub">Pick up to 4 properties to line up side by side.</p>
+      </div>
+      <div id="compare-picker" class="compare-picker"></div>
+      <div id="compare-table-wrap"></div>
+    </section>
+
+    <section id="view-contacts" class="view hidden">
+      <div class="section-head">
+        <h2>Contacts</h2>
+        <button id="btn-add-contact" class="stamp-btn" aria-label="Add contact">+</button>
+      </div>
+      <div id="contacts-list" class="ledger"></div>
+      <p id="contacts-empty" class="empty-state hidden">
+        No brokers, owners, or agents logged yet.
+      </p>
+    </section>
+
+    <section id="view-quickcalc" class="view hidden">
+      <div class="section-head">
+        <h2>Quick Calc</h2>
+      </div>
+      <p class="section-sub">Convert between cent / acre rates and total price. Not saved with any property — just a scratch pad.</p>
+      <div id="quickcalc-body"></div>
+    </section>
+
+  </main>
+
+  <nav class="tabbar" role="tablist" aria-label="Primary">
+    <button class="tab-btn active" data-view="register">
+      <span class="tab-icon" aria-hidden="true">&#9638;</span>
+      <span>Register</span>
+    </button>
+    <button class="tab-btn" data-view="compare">
+      <span class="tab-icon" aria-hidden="true">&#8644;</span>
+      <span>Compare</span>
+    </button>
+    <button class="tab-btn" data-view="contacts">
+      <span class="tab-icon" aria-hidden="true">&#9737;</span>
+      <span>Contacts</span>
+    </button>
+    <button class="tab-btn" data-view="quickcalc">
+      <span class="tab-icon" aria-hidden="true">&#8776;</span>
+      <span>Quick Calc</span>
+    </button>
+  </nav>
+</div>
+
+<!-- Property detail / edit overlay -->
+<div id="overlay-property" class="overlay hidden">
+  <div class="sheet">
+    <div class="sheet-head">
+      <button class="text-btn" id="prop-close">Close</button>
+      <span id="prop-heading">Property</span>
+      <button class="text-btn danger hidden" id="prop-delete">Delete</button>
+    </div>
+    <div class="sheet-tabs" id="prop-tabs">
+      <button class="sheet-tab active" data-tab="info">Info</button>
+      <button class="sheet-tab" data-tab="cost">Cost</button>
+      <button class="sheet-tab" data-tab="emi">EMI</button>
+      <button class="sheet-tab" data-tab="roi">Rental &amp; ROI</button>
+    </div>
+    <div class="sheet-body" id="prop-body"></div>
+  </div>
+</div>
+
+<!-- Contact edit overlay -->
+<div id="overlay-contact" class="overlay hidden">
+  <div class="sheet sheet-short">
+    <div class="sheet-head">
+      <button class="text-btn" id="contact-close">Close</button>
+      <span id="contact-heading">Contact</span>
+      <button class="text-btn danger hidden" id="contact-delete">Delete</button>
+    </div>
+    <div class="sheet-body" id="contact-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
