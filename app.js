@@ -383,7 +383,11 @@ function switchView(view) {
   state.view = view;
   document.querySelectorAll(".view").forEach((el) => el.classList.add("hidden"));
   document.getElementById("view-" + view).classList.remove("hidden");
-  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+  document.querySelectorAll(".tab-btn").forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+  });
   if (view === "register") renderRegister();
   if (view === "contacts") renderContacts();
   if (view === "compare") renderCompare();
