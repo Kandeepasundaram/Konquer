@@ -88,17 +88,36 @@ function parsePrice(v, fallback = 0) {
   }
   return n;
 }
+const DEFAULT_SETTINGS = { currencyMode: "inr", budgetMonthly: 0, videoFetcherUrl: "http://localhost:8792/fetch", theme: "auto", easyRead: false };
 function loadSettings() {
   try {
-    return Object.assign({ currencyMode: "inr", budgetMonthly: 0, videoFetcherUrl: "http://localhost:8792/fetch" }, JSON.parse(localStorage.getItem("prSettings") || "{}"));
+    return Object.assign({}, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem("prSettings") || "{}"));
   } catch (e) {
-    return { currencyMode: "inr", budgetMonthly: 0, videoFetcherUrl: "http://localhost:8792/fetch" };
+    return Object.assign({}, DEFAULT_SETTINGS);
   }
 }
 function saveSettings() {
   localStorage.setItem("prSettings", JSON.stringify(settings));
 }
 const settings = loadSettings();
+
+/* ---------------- Theme (light / dark / auto, plus easy-read) ---------------- */
+const THEME_COLORS = { light: "#16A34A", dark: "#0E1014" };
+const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+function resolveTheme() {
+  if (settings.theme === "light" || settings.theme === "dark") return settings.theme;
+  return darkQuery && darkQuery.matches ? "dark" : "light";
+}
+function applyTheme() {
+  const root = document.documentElement;
+  const theme = resolveTheme();
+  root.dataset.theme = theme;
+  if (settings.easyRead) root.dataset.easy = "1"; else delete root.dataset.easy;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", THEME_COLORS[theme]);
+}
+if (darkQuery) darkQuery.addEventListener("change", () => { if (settings.theme === "auto") applyTheme(); });
+applyTheme();
 
 function fmtINR(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return "—";
@@ -350,6 +369,7 @@ const state = {
   contactDraft: null,
   quickCalc: { unit: "cent", mode: "rate", area: 0, ratePerUnit: 0, totalPrice: 0, guidelineRate: 0 },
   qcTool: "land",
+  priceSqft: { mode: "total", unit: "sqft", area: 0, total: 0, rate: 0 },
   rentVsBuy: { price: 0, downPct: 20, ratePct: 8.5, years: 20, rent: 0, rentApprPct: 5, maintPct: 1, apprPct: 6, horizonYears: 10 },
   registerSearch: "",
   registerSort: "updated",
@@ -391,7 +411,7 @@ function switchView(view) {
   if (view === "register") renderRegister();
   if (view === "contacts") renderContacts();
   if (view === "compare") renderCompare();
-  if (view === "quickcalc") { renderQuickCalc(); renderRentVsBuy(); }
+  if (view === "quickcalc") { renderQuickCalc(); renderPriceSqft(); renderRentVsBuy(); }
   if (view === "settings") renderSettings();
 }
 
@@ -768,7 +788,7 @@ function renderPropertyBody() {
       <div id="cost-results"></div>
       <button class="btn-primary" id="f-save-cost">Save</button>
       ${d.priceHistory.length > 1 ? `
-        <div class="section-head" style="padding-top:14px;"><h2 style="font-size:14px;">Price history</h2></div>
+        <div class="section-head sub-head"><h2>Price history</h2></div>
         <div class="result-block">
           ${d.priceHistory.slice().reverse().map((h) => `<div class="result-row"><span>${h.date}</span><span class="val">${fmtINR(h.price)}</span></div>`).join("")}
         </div>
@@ -797,7 +817,7 @@ function renderPropertyBody() {
       <div id="emi-results"></div>
       <button class="btn-primary" id="f-save-emi">Save</button>
 
-      <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Prepayment impact</h2></div>
+      <div class="section-head sub-head"><h2>Prepayment impact</h2></div>
       <p class="hint">See how paying extra shortens the loan.</p>
       <div class="field-row">
         <div class="field"><label>Extra monthly (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="e-extra-monthly" value="${e_.extraMonthly || ""}" placeholder="e.g. 5000" /></div>
@@ -805,7 +825,7 @@ function renderPropertyBody() {
       </div>
       <div id="prepay-results"></div>
 
-      <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Compare loan scenarios</h2></div>
+      <div class="section-head sub-head"><h2>Compare loan scenarios</h2></div>
       <p class="hint">Line up different lenders/offers for this property.</p>
       <div id="scenario-list"></div>
       <div class="field-row">
@@ -1127,7 +1147,7 @@ function renderLinkedPropertiesBlock(contactId) {
   const linked = state.properties.filter((p) => p.contactId === contactId);
   if (linked.length === 0) return "";
   return `
-    <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Linked properties</h2></div>
+    <div class="section-head sub-head"><h2>Linked properties</h2></div>
     ${linked.map((p) => `<div class="linked-prop-row" data-id="${p.id}">${escapeHtml(p.title || "Untitled property")} — ${fmtINR(p.price)}</div>`).join("")}
   `;
 }
@@ -1383,8 +1403,95 @@ function recomputeRentVsBuy() {
   `;
 }
 
+/* ---------------- Price per sq.ft tool ---------------- */
+const AREA_UNITS = [
+  { key: "sqft", label: "sq.ft", sqft: 1 },
+  { key: "sqm", label: "sq.m", sqft: 10.7639 },
+  { key: "sqyd", label: "sq.yd (gaj)", sqft: 9 },
+  { key: "cent", label: "cent", sqft: SQFT_PER_CENT },
+  { key: "gunta", label: "gunta", sqft: 1089 },
+  { key: "ground", label: "ground", sqft: 2400 },
+  { key: "acre", label: "acre", sqft: 43560 }
+];
+const TEXT_INPUT_ATTRS = 'type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"';
+function renderPriceSqft() {
+  const s = state.priceSqft;
+  const body = document.getElementById("pricesqft-body");
+  const unit = AREA_UNITS.find((u) => u.key === s.unit) || AREA_UNITS[0];
+  body.innerHTML = `
+    <div class="toggle-group">
+      <button data-psf-mode="total" class="${s.mode === "total" ? "active" : ""}">Price → ₹/sq.ft</button>
+      <button data-psf-mode="rate" class="${s.mode === "rate" ? "active" : ""}">₹/sq.ft → Price</button>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Area</label><input type="number" step="any" id="psf-area" value="${s.area || ""}" placeholder="0" /></div>
+      <div class="field"><label>Unit</label>
+        <select id="psf-unit">${AREA_UNITS.map((u) => `<option value="${u.key}"${u.key === s.unit ? " selected" : ""}>${u.label}</option>`).join("")}</select>
+      </div>
+    </div>
+    ${s.mode === "total" ? `
+      <div class="field"><label>Total price (₹)</label><input ${TEXT_INPUT_ATTRS} id="psf-total" value="${s.total || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" /></div>
+    ` : `
+      <div class="field"><label>Rate per sq.ft (₹)</label><input ${TEXT_INPUT_ATTRS} id="psf-rate" value="${s.rate || ""}" placeholder="e.g. 6500, 6.5k" /></div>
+    `}
+    <div id="psf-results"></div>
+  `;
+  body.querySelectorAll("[data-psf-mode]").forEach((btn) => btn.addEventListener("click", () => { s.mode = btn.dataset.psfMode; renderPriceSqft(); }));
+  body.querySelector("#psf-area").addEventListener("input", (e) => { s.area = num(e.target.value); recomputePriceSqft(); });
+  body.querySelector("#psf-unit").addEventListener("change", (e) => { s.unit = e.target.value; recomputePriceSqft(); });
+  const money = body.querySelector(s.mode === "total" ? "#psf-total" : "#psf-rate");
+  money.addEventListener("input", (e) => { s[s.mode === "total" ? "total" : "rate"] = parsePrice(e.target.value); recomputePriceSqft(); });
+  recomputePriceSqft();
+}
+function recomputePriceSqft() {
+  const s = state.priceSqft;
+  const results = document.getElementById("psf-results");
+  if (!results) return;
+  const unit = AREA_UNITS.find((u) => u.key === s.unit) || AREA_UNITS[0];
+  const areaSqft = num(s.area) * unit.sqft;
+
+  let ratePerSqft, total;
+  if (s.mode === "total") {
+    total = num(s.total);
+    ratePerSqft = areaSqft > 0 ? total / areaSqft : null;
+  } else {
+    ratePerSqft = num(s.rate);
+    total = ratePerSqft * areaSqft;
+  }
+  const rateIn = (key) => {
+    const u = AREA_UNITS.find((x) => x.key === key);
+    return ratePerSqft === null ? "—" : fmtINR(ratePerSqft * u.sqft);
+  };
+  const areaLine = AREA_UNITS.filter((u) => u.key !== s.unit && ["sqft", "sqm", "sqyd", "cent"].includes(u.key))
+    .map((u) => `${fmtNum(areaSqft / u.sqft, u.key === "sqft" ? 0 : 2)} ${u.label}`).join(" · ");
+
+  results.innerHTML = `
+    <div class="result-block">
+      <div class="result-row">
+        <span>Area</span>
+        <span class="val">${fmtNum(areaSqft, 0)} sq.ft<span class="sub">${areaSqft > 0 ? areaLine : "—"}</span></span>
+      </div>
+      <div class="result-row total">
+        <span>Price per sq.ft</span>
+        <span class="val">${ratePerSqft === null ? "—" : fmtINR(ratePerSqft)}</span>
+      </div>
+      <div class="result-row"><span>Per sq.m</span><span class="val">${rateIn("sqm")}</span></div>
+      <div class="result-row"><span>Per sq.yd (gaj)</span><span class="val">${rateIn("sqyd")}</span></div>
+      <div class="result-row"><span>Per cent</span><span class="val">${rateIn("cent")}</span></div>
+      <div class="result-row"><span>Total price</span><span class="val">${fmtINR(total)}<span class="sub">${fmtLakhCrore(total)}</span></span></div>
+    </div>
+  `;
+}
+
 /* ---------------- Settings view ---------------- */
 function renderSettings() {
+  applyTheme();
+  document.querySelectorAll("#set-theme-toggle button").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themeOpt === (settings.theme || "auto"));
+  });
+  document.querySelectorAll("#set-easy-toggle button").forEach((btn) => {
+    btn.classList.toggle("active", (btn.dataset.easyOpt === "on") === !!settings.easyRead);
+  });
   document.querySelectorAll("#set-currency-toggle button").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === settings.currencyMode);
   });
@@ -1392,6 +1499,20 @@ function renderSettings() {
   document.getElementById("set-fetcher-url").value = settings.videoFetcherUrl || "";
 }
 function wireSettings() {
+  document.querySelectorAll("#set-theme-toggle button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      settings.theme = btn.dataset.themeOpt;
+      saveSettings();
+      renderSettings();
+    });
+  });
+  document.querySelectorAll("#set-easy-toggle button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      settings.easyRead = btn.dataset.easyOpt === "on";
+      saveSettings();
+      renderSettings();
+    });
+  });
   document.querySelectorAll("#set-currency-toggle button").forEach((btn) => {
     btn.addEventListener("click", () => {
       settings.currencyMode = btn.dataset.mode;
@@ -1448,6 +1569,7 @@ async function importDataFile(file) {
 /* ---------------- Wiring ---------------- */
 const QC_TOOL_SUB = {
   land: "Convert between cent / acre rates and total price. Not saved with any property — just a scratch pad.",
+  pricesqft: "Price per sq.ft from total price and area, or the reverse. Works with sq.ft, sq.m, sq.yd, cent, gunta, ground and acre. Scratch pad only.",
   rentvsbuy: "Rough rent-vs-buy comparison over a holding period. Not saved with any property — just a scratch pad."
 };
 function wireStatic() {
@@ -1462,6 +1584,7 @@ function wireStatic() {
       document.querySelectorAll("#qc-tool-toggle button").forEach((b) => b.classList.toggle("active", b === btn));
       document.getElementById("qc-tool-sub").textContent = QC_TOOL_SUB[state.qcTool];
       document.getElementById("quickcalc-body").classList.toggle("hidden", state.qcTool !== "land");
+      document.getElementById("pricesqft-body").classList.toggle("hidden", state.qcTool !== "pricesqft");
       document.getElementById("rentvsbuy-body").classList.toggle("hidden", state.qcTool !== "rentvsbuy");
     });
   });
