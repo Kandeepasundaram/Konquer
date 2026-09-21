@@ -1,4 +1,4 @@
-const CACHE_NAME = "property-register-v4";
+const CACHE_NAME = "property-register-v5";
 const ASSETS = [
   "./",
   "./index.html",

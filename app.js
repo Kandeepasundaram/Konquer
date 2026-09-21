@@ -348,7 +348,7 @@ const state = {
   openContactId: null,
   openContactIsNew: false,
   contactDraft: null,
-  quickCalc: { unit: "cent", mode: "rate", area: 0, ratePerUnit: 0, totalPrice: 0 },
+  quickCalc: { unit: "cent", mode: "rate", area: 0, ratePerUnit: 0, totalPrice: 0, guidelineRate: 0 },
   qcTool: "land",
   rentVsBuy: { price: 0, downPct: 20, ratePct: 8.5, years: 20, rent: 0, rentApprPct: 5, maintPct: 1, apprPct: 6, horizonYears: 10 },
   registerSearch: "",
@@ -1223,9 +1223,15 @@ function renderQuickCalc() {
       </div>
     `}
 
+    <div class="field">
+      <label>Guideline rate per ${unitLabel} (₹, optional)</label>
+      <input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="qc-guideline" value="${q.guidelineRate || ""}" placeholder="Govt. guideline value, e.g. 30000, 1L" />
+    </div>
+
     <div id="qc-results"></div>
   `;
 
+  body.querySelector("#qc-guideline").addEventListener("input", (e) => { q.guidelineRate = parsePrice(e.target.value); recomputeQuickCalc(); });
   body.querySelector("#qc-area").addEventListener("input", (e) => { q.area = num(e.target.value); recomputeQuickCalc(); });
   body.querySelectorAll("[data-unit]").forEach((btn) => btn.addEventListener("click", () => { q.unit = btn.dataset.unit; renderQuickCalc(); }));
   body.querySelectorAll("[data-mode]").forEach((btn) => btn.addEventListener("click", () => { q.mode = btn.dataset.mode; renderQuickCalc(); }));
@@ -1259,6 +1265,40 @@ function recomputeQuickCalc() {
     ratePerAcre = ratePerCent !== null ? ratePerCent * CENTS_PER_ACRE : null;
   }
 
+  const guidelineRate = num(q.guidelineRate);
+  let guidelineBlock = "";
+  if (guidelineRate > 0) {
+    const gRatePerCent = q.unit === "cent" ? guidelineRate : guidelineRate / CENTS_PER_ACRE;
+    const gRatePerAcre = gRatePerCent * CENTS_PER_ACRE;
+    const gTotal = gRatePerCent * areaCents;
+    let gap = "";
+    if (total > 0 && gTotal > 0) {
+      const diff = total - gTotal;
+      const pct = (diff / gTotal) * 100;
+      const dir = diff >= 0 ? "above" : "below";
+      gap = `
+        <div class="result-row total">
+          <span>Market vs guideline</span>
+          <span class="val">${fmtINR(Math.abs(diff))} ${dir}<span class="sub">${fmtNum(Math.abs(pct), 1)}% ${dir} guideline${diff < 0 ? " · duty is usually charged on guideline value" : ""}</span></span>
+        </div>`;
+    }
+    guidelineBlock = `
+      <div class="result-block">
+        <div class="result-row">
+          <span>Guideline rate per Cent</span>
+          <span class="val">${fmtINR(gRatePerCent)}</span>
+        </div>
+        <div class="result-row">
+          <span>Guideline rate per Acre</span>
+          <span class="val">${fmtINR(gRatePerAcre)}</span>
+        </div>
+        <div class="result-row">
+          <span>Guideline value (total)</span>
+          <span class="val">${areaCents > 0 ? `${fmtINR(gTotal)}<span class="sub">${fmtLakhCrore(gTotal)}</span>` : "—"}</span>
+        </div>${gap}
+      </div>`;
+  }
+
   results.innerHTML = `
     <div class="result-block">
       <div class="result-row">
@@ -1278,6 +1318,7 @@ function recomputeQuickCalc() {
         <span class="val">${fmtINR(total)}<span class="sub">${fmtLakhCrore(total)}</span></span>
       </div>
     </div>
+    ${guidelineBlock}
   `;
 }
 
