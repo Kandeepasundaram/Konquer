@@ -643,7 +643,7 @@ function renderPropertyBody() {
       <div class="field-row">
         <div class="field">
           <label>Price (₹)</label>
-          <input type="text" inputmode="decimal" id="f-price" value="${d.price || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
+          <input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="f-price" value="${d.price || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
         </div>
         <div class="field">
           <label>Area (sqft)</label>
@@ -760,7 +760,7 @@ function renderPropertyBody() {
         <div class="field"><label>Brokerage %</label><input type="number" step="0.1" id="c-brokerage" value="${c.brokeragePct}" /></div>
         <div class="field"><label>GST %</label><input type="number" step="0.1" id="c-gst" value="${c.gstPct}" /></div>
       </div>
-      <div class="field"><label>Other charges (₹, flat)</label><input type="text" inputmode="decimal" id="c-other" value="${c.otherCharges}" placeholder="e.g. 50000, 1L" /></div>
+      <div class="field"><label>Other charges (₹, flat)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="c-other" value="${c.otherCharges}" placeholder="e.g. 50000, 1L" /></div>
       <div id="cost-results"></div>
       <button class="btn-primary" id="f-save-cost">Save</button>
       ${d.priceHistory.length > 1 ? `
@@ -785,7 +785,7 @@ function renderPropertyBody() {
     if (state.openPropertyIsNew && !e_._touched && d.price) e_.loanAmount = Math.round(d.price * 0.8);
     body.innerHTML = `
       <p class="hint">Standard reducing-balance EMI on the loan amount you plan to borrow.</p>
-      <div class="field"><label>Loan amount (₹)</label><input type="text" inputmode="decimal" id="e-loan" value="${e_.loanAmount || ""}" placeholder="e.g. 36L, 0.4Cr" /></div>
+      <div class="field"><label>Loan amount (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="e-loan" value="${e_.loanAmount || ""}" placeholder="e.g. 36L, 0.4Cr" /></div>
       <div class="field-row">
         <div class="field"><label>Interest rate % p.a.</label><input type="number" step="0.05" id="e-rate" value="${e_.interestRatePct}" /></div>
         <div class="field"><label>Tenure (years)</label><input type="number" id="e-years" value="${e_.tenureYears}" /></div>
@@ -796,8 +796,8 @@ function renderPropertyBody() {
       <div class="section-head" style="padding-top:18px;"><h2 style="font-size:14px;">Prepayment impact</h2></div>
       <p class="hint">See how paying extra shortens the loan.</p>
       <div class="field-row">
-        <div class="field"><label>Extra monthly (₹)</label><input type="text" inputmode="decimal" id="e-extra-monthly" value="${e_.extraMonthly || ""}" placeholder="e.g. 5000" /></div>
-        <div class="field"><label>Extra one-time now (₹)</label><input type="text" inputmode="decimal" id="e-extra-lump" value="${e_.extraOneTime || ""}" placeholder="e.g. 1L" /></div>
+        <div class="field"><label>Extra monthly (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="e-extra-monthly" value="${e_.extraMonthly || ""}" placeholder="e.g. 5000" /></div>
+        <div class="field"><label>Extra one-time now (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="e-extra-lump" value="${e_.extraOneTime || ""}" placeholder="e.g. 1L" /></div>
       </div>
       <div id="prepay-results"></div>
 
@@ -806,7 +806,7 @@ function renderPropertyBody() {
       <div id="scenario-list"></div>
       <div class="field-row">
         <div class="field"><label>Name</label><input type="text" id="ls-name" placeholder="e.g. SBI" /></div>
-        <div class="field"><label>Loan (₹)</label><input type="text" inputmode="decimal" id="ls-loan" placeholder="e.g. 36L" /></div>
+        <div class="field"><label>Loan (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="ls-loan" placeholder="e.g. 36L" /></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Rate %</label><input type="number" step="0.05" id="ls-rate" placeholder="8.5" /></div>
@@ -841,7 +841,7 @@ function renderPropertyBody() {
     const r = d.rental;
     body.innerHTML = `
       <p class="hint">Estimate rental yield and total return if you hold the property for a number of years.</p>
-      <div class="field"><label>Expected monthly rent (₹)</label><input type="text" inputmode="decimal" id="r-rent" value="${r.monthlyRent || ""}" placeholder="e.g. 25000, 25k" /></div>
+      <div class="field"><label>Expected monthly rent (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="r-rent" value="${r.monthlyRent || ""}" placeholder="e.g. 25000, 25k" /></div>
       <div class="field-row">
         <div class="field"><label>Annual expenses % of cost</label><input type="number" step="0.1" id="r-exp" value="${r.annualExpensesPct}" /></div>
         <div class="field"><label>Appreciation % p.a.</label><input type="number" step="0.1" id="r-appr" value="${r.appreciationPct}" /></div>
@@ -1214,12 +1214,12 @@ function renderQuickCalc() {
     ${q.mode === "rate" ? `
       <div class="field">
         <label>Rate per ${unitLabel} (₹)</label>
-        <input type="text" inputmode="decimal" id="qc-rate" value="${q.ratePerUnit || ""}" placeholder="e.g. 50000, 1L" />
+        <input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="qc-rate" value="${q.ratePerUnit || ""}" placeholder="e.g. 50000, 1L" />
       </div>
     ` : `
       <div class="field">
         <label>Total price (₹)</label>
-        <input type="text" inputmode="decimal" id="qc-total" value="${q.totalPrice || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
+        <input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="qc-total" value="${q.totalPrice || ""}" placeholder="e.g. 45L, 1.2Cr, 4500000" />
       </div>
     `}
 
@@ -1286,14 +1286,14 @@ function renderRentVsBuy() {
   const body = document.getElementById("rentvsbuy-body");
   body.innerHTML = `
     <div class="field-row">
-      <div class="field"><label>Property price (₹)</label><input type="text" inputmode="decimal" id="rvb-price" value="${rvb.price || ""}" placeholder="e.g. 60L" /></div>
+      <div class="field"><label>Property price (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="rvb-price" value="${rvb.price || ""}" placeholder="e.g. 60L" /></div>
       <div class="field"><label>Down payment %</label><input type="number" id="rvb-down" value="${rvb.downPct}" /></div>
     </div>
     <div class="field-row">
       <div class="field"><label>Loan rate % p.a.</label><input type="number" step="0.05" id="rvb-rate" value="${rvb.ratePct}" /></div>
       <div class="field"><label>Loan tenure (years)</label><input type="number" id="rvb-years" value="${rvb.years}" /></div>
     </div>
-    <div class="field"><label>Equivalent monthly rent (₹)</label><input type="text" inputmode="decimal" id="rvb-rent" value="${rvb.rent || ""}" placeholder="e.g. 20000" /></div>
+    <div class="field"><label>Equivalent monthly rent (₹)</label><input type="text" inputmode="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" id="rvb-rent" value="${rvb.rent || ""}" placeholder="e.g. 20000" /></div>
     <div class="field-row">
       <div class="field"><label>Rent increase % p.a.</label><input type="number" step="0.1" id="rvb-rentappr" value="${rvb.rentApprPct}" /></div>
       <div class="field"><label>Maintenance % of price p.a.</label><input type="number" step="0.1" id="rvb-maint" value="${rvb.maintPct}" /></div>
